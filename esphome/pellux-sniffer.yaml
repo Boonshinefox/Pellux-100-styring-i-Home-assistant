@@ -1,0 +1,196 @@
+# Pellux 100 (NIBE / Vølund, Estyma-styring) -> Home Assistant
+# ESP32-S3 + SN65HVD230 CAN-transceiver. KUN LYTNING (LISTENONLY).
+#
+# Ledninger:  SN65HVD230 3V3 -> 3V3, GND -> G, CTX -> GPIO4, CRX -> GPIO5
+#             CANL -> MC-1 klemme 45, CANH -> 46, GND -> 47
+# Hemmeligheder ligger i secrets.yaml (se secrets.example.yaml).
+
+esphome:
+  name: pellux-sniffer
+  friendly_name: pellux-sniffer
+
+esp32:
+  variant: esp32s3
+  framework:
+    type: esp-idf
+
+# Bussen sender ca. 260 beskeder i sekundet. Log ALDRIG hver besked til USB,
+# så går ESP'en ned (watchdog). baud_rate: 0 slår USB-loggen fra.
+logger:
+  level: INFO
+  baud_rate: 0
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    # Krypteret OTA (ESPHome 2026.x). På ældre ESPHome: brug "password: !secret ota_password".
+    encryption:
+      key: !secret ota_encryption_key
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: pellux-sniffer Fallback Hotspot
+    password: !secret fallback_ap_password
+
+captive_portal:
+
+# ---- Valgfrit: DS18B20 returføler på kreds 1 (GPIO6, 4,7 kOhm pull-up til 3,3 V) ----
+# Fjern # foran de næste linjer, når føleren er monteret.
+# one_wire:
+#   - platform: gpio
+#     pin: GPIO6
+
+sensor:
+  # - platform: dallas_temp
+  #   id: kreds1_retur
+  #   name: "Kreds 1 retur"
+  #   update_interval: 30s
+  #   accuracy_decimals: 1
+
+  # ---- Afkodede værdier ----
+  # Alle fire temperaturer er samme slags NTC-føler (se README for formlen).
+  - platform: template
+    id: kedel_temp
+    name: "Kedeltemperatur"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - throttle_average: 10s
+  - platform: template
+    id: varmt_vand
+    name: "Varmt vand"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - throttle_average: 30s
+  - platform: template
+    id: kreds1_frem
+    name: "Kreds 1 fremløb"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - throttle_average: 30s
+  - platform: template
+    id: ude_temp
+    name: "Udetemperatur"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - throttle_average: 60s
+  - platform: template
+    id: blaeser
+    name: "Blæser"
+    unit_of_measurement: "%"
+    state_class: measurement
+    accuracy_decimals: 0
+    filters:
+      - delta: 0.5
+  - platform: template
+    id: flamme
+    name: "Flamme"
+    state_class: measurement
+    accuracy_decimals: 0
+    filters:
+      - throttle_average: 10s
+  # Tændelementet: ca. 11 i hvile, ca. 500 mens det gløder (ikke 100 % bekræftet).
+  - platform: template
+    id: taender_raa
+    name: "Tænder rå"
+    accuracy_decimals: 0
+    filters:
+      - throttle_average: 30s
+
+binary_sensor:
+  - platform: template
+    id: snegl
+    name: "Snegl (fremføring)"
+  # EKSPERIMENTEL: 0x246 byte 0 ligner hovedmodulets udgange. Bit 0x02 slukker
+  # præcis under varmtvandsopvarmning, så det er sandsynligvis kreds 1-pumpen.
+  - platform: template
+    id: kreds1_pumpe
+    name: "Kreds 1 pumpe (kandidat)"
+
+canbus:
+  - platform: esp32_can
+    id: pellux_can
+    tx_pin: GPIO4
+    rx_pin: GPIO5
+    can_id: 0x7FF
+    bit_rate: 125kbps
+    mode: LISTENONLY   # sender intet og kvitterer ikke. Lad den stå!
+    on_frame:
+      # 0x2C6: kedel (b0-1), varmt vand (b4-5), kreds 1 fremløb (b6-7)
+      - can_id: 0x2C6
+        then:
+          - lambda: |-
+              if (x.size() < 8) return;
+              // NTC-føler: rå 12-bit værdi -> °C (B ca. 3913, tilpasset panelets visning)
+              auto ntc = [](int raw) -> float {
+                if (raw <= 0 || raw >= 4095) return NAN;
+                return 3912.65f / (logf((float) raw / (4095.0f - raw)) + 12.5508f) - 273.15f;
+              };
+              id(kedel_temp).publish_state(ntc(x[0] | (x[1] << 8)));
+              id(varmt_vand).publish_state(ntc(x[4] | (x[5] << 8)));
+              id(kreds1_frem).publish_state(ntc(x[6] | (x[7] << 8)));
+      # Blæser: byte 2-3 / 25 = %
+      - can_id: 0x201
+        then:
+          - lambda: |-
+              if (x.size() < 4) return;
+              id(blaeser).publish_state((x[2] | (x[3] << 8)) / 25.0f);
+      # Snegl: byte 0 = 1 når sneglen kører
+      - can_id: 0x446
+        then:
+          - lambda: |-
+              if (x.size() < 1) return;
+              id(snegl).publish_state(x[0] == 1);
+      # 0x4C6: tænder (b2-3), udetemperatur (b4-5), flamme (b6-7: panelets tal = 255 - rå/16)
+      - can_id: 0x4C6
+        then:
+          - lambda: |-
+              if (x.size() < 8) return;
+              auto ntc = [](int raw) -> float {
+                if (raw <= 0 || raw >= 4095) return NAN;
+                return 3912.65f / (logf((float) raw / (4095.0f - raw)) + 12.5508f) - 273.15f;
+              };
+              int raw = x[6] | (x[7] << 8);
+              id(flamme).publish_state(255 - raw / 16);
+              id(taender_raa).publish_state(x[2] | (x[3] << 8));
+              id(ude_temp).publish_state(ntc(x[4] | (x[5] << 8)));
+      # EKSPERIMENTEL: udgangs-bitmaske fra hovedmodulet
+      - can_id: 0x246
+        then:
+          - lambda: |-
+              if (x.size() < 1) return;
+              id(kreds1_pumpe).publish_state((x[0] & 0x02) != 0);
+      # Til videre jagt: log ændringer på alle andre ID'er (kan slettes).
+      # Se loggen i ESPHome-dashboardet; skift noget på panelet og se hvad der ændrer sig.
+      - can_id: 0
+        can_id_mask: 0
+        then:
+          - lambda: |-
+              if (can_id == 0x2C6 || can_id == 0x3C6 || can_id == 0x4C6) return;
+              static uint8_t last[2048][9];
+              static bool seen[2048];
+              uint16_t id = can_id & 0x7FF;
+              uint8_t n = x.size() > 8 ? 8 : x.size();
+              if (seen[id] && last[id][8] == n && memcmp(last[id], x.data(), n) == 0) return;
+              seen[id] = true;
+              last[id][8] = n;
+              memcpy(last[id], x.data(), n);
+              char s[32]; s[0] = 0;
+              for (uint8_t i = 0; i < n; i++) sprintf(s + i * 3, "%02X ", x[i]);
+              ESP_LOGI("pellux", "id=0x%03X  %s", id, s);

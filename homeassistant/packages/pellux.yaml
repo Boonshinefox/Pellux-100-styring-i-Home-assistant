@@ -1,0 +1,340 @@
+# Pellux 100 -> Home Assistant: alt i én "package".
+#
+# Installation:
+#   1. I configuration.yaml (én gang):
+#        homeassistant:
+#          packages: !include_dir_named packages
+#   2. Læg denne fil i /config/packages/pellux.yaml
+#   3. Ret "DIN_..." herunder, tjek konfigurationen og genstart HA.
+#
+# Entity-navnene forudsætter at ESPHome-enheden hedder "pellux-sniffer".
+
+# ---------------------------------------------------------------------------
+# Indstillinger (kan ændres fra dashboardet bagefter)
+# ---------------------------------------------------------------------------
+input_number:
+  pillefyr_kilo_pr_saek:
+    name: Pillefyr kilo pr sæk
+    min: 1
+    max: 50
+    step: 0.5
+    mode: box
+    unit_of_measurement: kg
+    icon: mdi:sack
+  pillefyr_snegl_gram_pr_minut:
+    name: Pillefyr snegl gram pr minut
+    min: 10
+    max: 2000
+    step: 1
+    mode: box
+    unit_of_measurement: g/min
+    icon: mdi:screw-machine-flat-top
+  pillefyr_beholdning_ved_pafyldning:
+    name: Pillefyr beholdning ved påfyldning
+    min: 0
+    max: 1000
+    step: 0.1
+    mode: box
+    unit_of_measurement: kg
+  pillefyr_snegl_minutter_ved_pafyldning:
+    name: Pillefyr snegl minutter ved påfyldning
+    min: 0
+    max: 10000000
+    step: 0.01
+    mode: box
+    unit_of_measurement: min
+  pillefyr_saet_beholdning:
+    name: Pillefyr sæt beholdning
+    min: 0
+    max: 1000
+    step: 1
+    mode: box
+    unit_of_measurement: kg
+    icon: mdi:pencil
+  pillefyr_kwh_pr_kg_piller:
+    name: Pillefyr kWh pr. kg piller
+    min: 4
+    max: 5.5
+    step: 0.05
+    mode: box
+    unit_of_measurement: kWh/kg
+    icon: mdi:fire
+  pillefyr_virkningsgrad:
+    name: Pillefyr virkningsgrad
+    min: 50
+    max: 100
+    step: 1
+    mode: box
+    unit_of_measurement: "%"
+    icon: mdi:percent
+  varmt_vand_kwh_pr_dogn:
+    name: Varmt vand kWh pr. døgn
+    min: 0
+    max: 20
+    step: 0.5
+    mode: box
+    unit_of_measurement: kWh
+    icon: mdi:water-boiler
+
+# Startværdier (sættes kun første gang; ret dem bagefter i dashboardet):
+#   snegl g/min: 250 (gæt, kalibrér!), kWh/kg: 4,8, virkningsgrad: 85 %, varmt vand: 3 kWh/døgn.
+# Brug Udviklerværktøjer -> Handlinger -> input_number.set_value første gang.
+
+counter:
+  pillefyr_saekke_fyldt_pa:
+    name: Pillefyr sække fyldt på
+    icon: mdi:sack
+    initial: 0
+    minimum: 0
+    step: 1
+    restore: true
+
+input_datetime:
+  pillefyr_sidst_fyldt:
+    name: Pillefyr sidst fyldt
+    has_date: true
+    has_time: true
+    icon: mdi:calendar-clock
+
+# ---------------------------------------------------------------------------
+# Pilletæller: snegl-minutter -> kg
+# ---------------------------------------------------------------------------
+template:
+  - sensor:
+      - name: Pellux snegl kører
+        unique_id: pellux_snegl_korer
+        state: "{{ 1 if is_state('binary_sensor.pellux_sniffer_snegl_fremforing', 'on') else 0 }}"
+
+      - name: Pillefyr beholdning beregnet
+        unique_id: pillefyr_beholdning_beregnet
+        unit_of_measurement: kg
+        device_class: weight
+        state_class: measurement
+        availability: >
+          {{ has_value('sensor.pellux_snegl_minutter_i_alt')
+             or states('input_number.pillefyr_snegl_minutter_ved_pafyldning') | float(0) == 0 }}
+        state: >
+          {% set brugt = (states('sensor.pellux_snegl_minutter_i_alt') | float(0)
+                          - states('input_number.pillefyr_snegl_minutter_ved_pafyldning') | float(0))
+                         * states('input_number.pillefyr_snegl_gram_pr_minut') | float(0) / 1000 %}
+          {{ [states('input_number.pillefyr_beholdning_ved_pafyldning') | float(0) - [brugt, 0] | max, 0] | max | round(1) }}
+
+      # ---- Varmeeffekt og husets varmetab (ud fra pilleforbruget) ----
+      - name: Pillefyr varme 24 t
+        unique_id: pillefyr_varme_24_t
+        unit_of_measurement: kWh
+        state_class: measurement
+        availability: >
+          {{ has_value('sensor.pellux_snegl_minutter_24_t')
+             and has_value('input_number.pillefyr_snegl_gram_pr_minut') }}
+        state: >
+          {{ (states('sensor.pellux_snegl_minutter_24_t') | float
+              * states('input_number.pillefyr_snegl_gram_pr_minut') | float / 1000
+              * states('input_number.pillefyr_kwh_pr_kg_piller') | float
+              * states('input_number.pillefyr_virkningsgrad') | float / 100) | round(1) }}
+
+      - name: Husets varmetab
+        unique_id: husets_varmetab
+        unit_of_measurement: W/K
+        state_class: measurement
+        availability: >
+          {{ has_value('sensor.pillefyr_varme_24_t')
+             and has_value('sensor.indetemperatur_middel_24_t')
+             and has_value('sensor.udetemperatur_middel_24_t')
+             and (states('sensor.indetemperatur_middel_24_t') | float(0)
+                  - states('sensor.udetemperatur_middel_24_t') | float(0)) >= 4 }}
+        state: >
+          {% set q = states('sensor.pillefyr_varme_24_t') | float
+                     - states('input_number.varmt_vand_kwh_pr_dogn') | float %}
+          {% set dt = states('sensor.indetemperatur_middel_24_t') | float
+                      - states('sensor.udetemperatur_middel_24_t') | float %}
+          {{ (q * 1000 / (24 * dt)) | round(0) }}
+
+      - name: Varmebehov ved -12 °C
+        unique_id: varmebehov_ved_12_degc
+        unit_of_measurement: kW
+        device_class: power
+        state_class: measurement
+        availability: "{{ has_value('sensor.husets_varmetab') and has_value('sensor.indetemperatur_middel_24_t') }}"
+        state: >
+          {{ (states('sensor.husets_varmetab') | float
+              * (states('sensor.indetemperatur_middel_24_t') | float + 12) / 1000) | round(1) }}
+
+sensor:
+  # Snegl-minutter i alt (Riemann-integral af 0/1). Nulstilles aldrig.
+  - platform: integration
+    name: Pellux snegl minutter i alt
+    unique_id: pellux_snegl_minutter_i_alt
+    source: sensor.pellux_snegl_korer
+    unit_time: min
+    method: left
+    round: 3
+
+  # Rullende 24 timer
+  - platform: statistics
+    name: Pellux snegl minutter 24 t
+    unique_id: pellux_snegl_minutter_24_t
+    entity_id: sensor.pellux_snegl_minutter_i_alt
+    state_characteristic: change
+    sampling_size: 50000
+    max_age:
+      hours: 24
+    keep_last_sample: true
+    precision: 2
+  - platform: statistics
+    name: Udetemperatur middel 24 t
+    unique_id: udetemperatur_middel_24_t
+    entity_id: sensor.pellux_sniffer_udetemperatur
+    state_characteristic: average_linear
+    sampling_size: 50000
+    max_age:
+      hours: 24
+    keep_last_sample: true
+    precision: 1
+  - platform: statistics
+    name: Indetemperatur middel 24 t
+    unique_id: indetemperatur_middel_24_t
+    entity_id: sensor.husets_indetemperatur_middel
+    state_characteristic: average_linear
+    sampling_size: 50000
+    max_age:
+      hours: 24
+    keep_last_sample: true
+    precision: 1
+
+  # Husets indetemperatur: gennemsnit af dine egne rumfølere. RET LISTEN!
+  - platform: min_max
+    name: Husets indetemperatur middel
+    unique_id: husets_indetemperatur_middel
+    type: mean
+    round_digits: 1
+    entity_ids:
+      - sensor.DIN_STUE_TEMPERATUR
+      - sensor.DIT_SOVEVAERELSE_TEMPERATUR
+      - sensor.DIT_KOEKKEN_TEMPERATUR
+
+  # ---- Varmtvandsprioritet (ud fra temperaturen) ----
+  # Hvor hurtigt stiger varmt vand? Over ca. 8 °C/time = fyret varmer vandet op.
+  - platform: derivative
+    name: Pellux varmt vand stigning
+    unique_id: pellux_varmt_vand_stigning
+    source: sensor.pellux_sniffer_varmt_vand
+    round: 1
+    unit_time: h
+    time_window: "00:05:00"
+
+binary_sensor:
+  - platform: threshold
+    name: Pellux varmtvandsprioritet
+    entity_id: sensor.pellux_varmt_vand_stigning
+    upper: 8
+    hysteresis: 3
+
+# ---------------------------------------------------------------------------
+# Knapper til pilletælleren
+# ---------------------------------------------------------------------------
+script:
+  pillefyr_saet_beholdning:
+    alias: Pillefyr sæt beholdning
+    description: Sætter den beregnede pillebeholdning til et antal kg og nulstiller sneglens tællerpunkt.
+    icon: mdi:silo
+    mode: queued
+    fields:
+      kg:
+        name: Kg
+        required: true
+        selector:
+          number:
+            min: 0
+            max: 1000
+            step: 0.1
+            mode: box
+            unit_of_measurement: kg
+    sequence:
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.pillefyr_snegl_minutter_ved_pafyldning
+        data:
+          value: "{{ states('sensor.pellux_snegl_minutter_i_alt') | float(0) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.pillefyr_beholdning_ved_pafyldning
+        data:
+          value: "{{ [kg | float(0), 0] | max }}"
+
+  pillefyr_plus_saek:
+    alias: Pillefyr +1 sæk
+    description: Lægger én sæk til beholdningen. Tryk igen inden for 2 timer tæller med i samme påfyldning.
+    icon: mdi:sack
+    mode: queued
+    sequence:
+      - if:
+          - condition: template
+            value_template: >
+              {{ now() - (states('input_datetime.pillefyr_sidst_fyldt')
+                 | as_datetime(default=as_datetime('2000-01-01')) | as_local) > timedelta(hours=2) }}
+        then:
+          - action: counter.reset
+            target:
+              entity_id: counter.pillefyr_saekke_fyldt_pa
+      - action: counter.increment
+        target:
+          entity_id: counter.pillefyr_saekke_fyldt_pa
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.pillefyr_sidst_fyldt
+        data:
+          timestamp: "{{ now().timestamp() }}"
+      - action: script.pillefyr_saet_beholdning
+        data:
+          kg: >
+            {{ states('sensor.pillefyr_beholdning_beregnet') | float(0)
+               + states('input_number.pillefyr_kilo_pr_saek') | float(15) }}
+
+  pillefyr_minus_saek:
+    alias: Pillefyr −1 sæk (fortryd)
+    icon: mdi:undo
+    mode: queued
+    sequence:
+      - action: counter.decrement
+        target:
+          entity_id: counter.pillefyr_saekke_fyldt_pa
+      - action: script.pillefyr_saet_beholdning
+        data:
+          kg: >
+            {{ [states('sensor.pillefyr_beholdning_beregnet') | float(0)
+                - states('input_number.pillefyr_kilo_pr_saek') | float(15), 0] | max }}
+
+automation:
+  - id: pillefyr_ret_beholdning_fra_indtastning
+    alias: "Pillefyr: ret beholdning fra indtastning"
+    description: Når feltet 'Pillefyr sæt beholdning' ændres, bliver den beregnede beholdning sat til det tal.
+    mode: queued
+    triggers:
+      - trigger: state
+        entity_id: input_number.pillefyr_saet_beholdning
+        not_from: [unavailable, unknown]
+        not_to: [unavailable, unknown]
+    actions:
+      - action: script.pillefyr_saet_beholdning
+        data:
+          kg: "{{ trigger.to_state.state | float(0) }}"
+
+  # Valgfri: besked på telefonen når fyret har tændt. Ret notify-tjenesten.
+  - id: pellux_besked_nar_fyret_starter
+    alias: "Pellux: besked når fyret starter"
+    description: Sender besked, når flammen er etableret.
+    mode: single
+    triggers:
+      - trigger: numeric_state
+        entity_id: sensor.pellux_sniffer_flamme
+        above: 100
+        for:
+          minutes: 1
+    actions:
+      - action: notify.mobile_app_DIN_TELEFON
+        data:
+          title: Pellux brænder nu
+          message: >
+            Fyret er startet. Kedel {{ states('sensor.pellux_sniffer_kedeltemperatur') }} °C,
+            varmt vand {{ states('sensor.pellux_sniffer_varmt_vand') }} °C.

@@ -1,0 +1,143 @@
+# Pellux-visning til et Home Assistant-dashboard.
+# Kun standardkort, så der skal ikke installeres noget fra HACS.
+# Brug: Dashboard -> blyant -> tre prikker -> "Rå konfigurationseditor",
+# og indsæt denne visning under "views:" (eller lav et nyt dashboard med den).
+
+title: Fyr
+path: fyr
+icon: mdi:fireplace
+type: sections
+max_columns: 3
+sections:
+  - type: grid
+    cards:
+      - type: heading
+        heading: Pellux 100
+        icon: mdi:fireplace
+      - type: markdown
+        content: |
+          {% set fl = states('sensor.pellux_sniffer_flamme') | float(-1) %}
+          {% set bl = states('sensor.pellux_sniffer_blaeser') | float(-1) %}
+          {% set ig = states('sensor.pellux_sniffer_taender_ra') | float(0) %}
+          {% if fl < 0 and bl < 0 %}### ⚪ Offline
+          {% elif ig > 200 %}### 🟠 Tænder
+          {% elif fl > 50 %}### 🔥 Brænder
+          {% elif bl >= 90 %}### 🌀 Udluftning
+          {% elif bl > 0 %}### 🌀 Starter / slukker
+          {% else %}### ⏸️ Stop{% endif %}
+          {% if is_state('binary_sensor.pellux_varmtvandsprioritet', 'on') %}🚿 Varmer varmt vand op{% endif %}
+      - type: tile
+        entity: sensor.pellux_sniffer_kedeltemperatur
+        name: Kedel
+        icon: mdi:fire
+      - type: tile
+        entity: sensor.pellux_sniffer_varmt_vand
+        name: Varmt vand
+        icon: mdi:water-thermometer
+      - type: tile
+        entity: sensor.pellux_sniffer_kreds_1_fremlob
+        name: Fremløb kreds 1
+        icon: mdi:radiator
+      - type: tile
+        entity: sensor.pellux_sniffer_udetemperatur
+        name: Ude
+        icon: mdi:home-thermometer-outline
+      - type: tile
+        entity: sensor.pellux_sniffer_flamme
+        name: Flamme
+        icon: mdi:fire-circle
+      - type: tile
+        entity: sensor.pellux_sniffer_blaeser
+        name: Blæser
+        icon: mdi:fan
+      - type: tile
+        entity: binary_sensor.pellux_sniffer_snegl_fremforing
+        name: Snegl
+        icon: mdi:screw-lag
+      - type: tile
+        entity: binary_sensor.pellux_varmtvandsprioritet
+        name: Varmtvandsprioritet
+        icon: mdi:water-boiler
+
+  - type: grid
+    cards:
+      - type: heading
+        heading: Grafer
+        icon: mdi:chart-line
+      - type: history-graph
+        title: Temperaturer (24 t)
+        hours_to_show: 24
+        entities:
+          - entity: sensor.pellux_sniffer_kedeltemperatur
+            name: Kedel
+          - entity: sensor.pellux_sniffer_varmt_vand
+            name: Varmt vand
+          - entity: sensor.pellux_sniffer_kreds_1_fremlob
+            name: Fremløb
+          - entity: sensor.pellux_sniffer_udetemperatur
+            name: Ude
+      - type: history-graph
+        title: Forbrænding (6 t)
+        hours_to_show: 6
+        entities:
+          - entity: sensor.pellux_sniffer_flamme
+            name: Flamme
+          - entity: sensor.pellux_sniffer_blaeser
+            name: Blæser
+          - entity: binary_sensor.pellux_sniffer_snegl_fremforing
+            name: Snegl
+
+  - type: grid
+    cards:
+      - type: heading
+        heading: Piller
+        icon: mdi:grain
+      - type: tile
+        entity: sensor.pillefyr_beholdning_beregnet
+        name: Beholdning (beregnet)
+        icon: mdi:silo
+      - type: tile
+        entity: counter.pillefyr_saekke_fyldt_pa
+        name: Fyldt på nu
+        icon: mdi:sack
+      - type: button
+        name: +1 sæk
+        icon: mdi:plus
+        tap_action:
+          action: perform-action
+          perform_action: script.pillefyr_plus_saek
+      - type: button
+        name: Fortryd
+        icon: mdi:undo
+        tap_action:
+          action: perform-action
+          perform_action: script.pillefyr_minus_saek
+      - type: entities
+        title: Indstillinger
+        entities:
+          - entity: input_number.pillefyr_saet_beholdning
+            name: Ret beholdning (kg)
+          - entity: input_number.pillefyr_kilo_pr_saek
+            name: Kg pr. sæk
+          - entity: input_number.pillefyr_snegl_gram_pr_minut
+            name: Snegl g/min
+      - type: heading
+        heading: Varmetab
+        icon: mdi:home-thermometer
+      - type: tile
+        entity: sensor.husets_varmetab
+        name: Husets varmetab
+      - type: tile
+        entity: sensor.varmebehov_ved_12_degc
+        name: Behov ved -12 °C
+      - type: entities
+        entities:
+          - entity: sensor.pillefyr_varme_24_t
+            name: Varme sidste 24 t
+          - entity: sensor.indetemperatur_middel_24_t
+            name: Inde, middel 24 t
+          - entity: sensor.udetemperatur_middel_24_t
+            name: Ude, middel 24 t
+          - entity: input_number.pillefyr_kwh_pr_kg_piller
+          - entity: input_number.pillefyr_virkningsgrad
+          - entity: input_number.varmt_vand_kwh_pr_dogn

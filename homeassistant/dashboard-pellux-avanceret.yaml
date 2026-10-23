@@ -1,0 +1,820 @@
+# Pellux 100: flot Fyr-dashboard med animeret tegning af fyret.
+#
+# KRÆVER disse kort fra HACS (Frontend): button-card, layout-card, apexcharts-card, card-mod.
+# Kræver også pakken homeassistant/packages/pellux.yaml og ESPHome-enheden "pellux-sniffer".
+#
+# Sådan:  Indstillinger -> Dashboards -> + Tilføj dashboard -> "Nyt dashboard fra bunden"
+#         -> åbn det -> blyant -> tre prikker -> "Rå konfigurationseditor"
+#         -> slet alt og indsæt HELE denne fil -> Gem.
+#
+# Ret dine egne tal under button_card_templates -> kort -> variables:
+#   maal_kedel  = kedlens setpunkt (°C), vises som streg på målerne
+#   maal_vv     = varmtvandets setpunkt (°C)
+#   beholder_kg = hvor mange kg piller der kan være i beholderen
+#
+# Virker på både pc/tablet (4 kolonner) og telefon (2 kolonner).
+
+button_card_templates:
+  kort:
+    show_name: false
+    show_icon: false
+    show_state: false
+    show_label: false
+    variables:
+      h: auto
+      maal_kedel: 65
+      maal_vv: 55
+      beholder_kg: 225
+    styles:
+      card:
+      - height: '[[[ return variables.h ]]]'
+      - padding: 14px
+      - border-radius: 18px
+      - background: 'linear-gradient(180deg, #0f2335 0%, #0a1824 100%)'
+      - border: 1px solid rgba(40,110,150,0.28)
+      - box-shadow: none
+      - color: white
+      - overflow: hidden
+      - cursor: default
+      grid:
+      - grid-template-areas: '"body"'
+      - grid-template-columns: minmax(0,1fr)
+      - grid-template-rows: minmax(0,1fr)
+      - height: 100%
+      custom_fields:
+        body:
+        - align-self: stretch
+        - justify-self: stretch
+        - min-width: '0'
+        - height: 100%
+        - text-align: left
+views:
+- title: Fyr
+  path: fyr
+  icon: mdi:fireplace
+  type: custom:grid-layout
+  background: '#07111b'
+  layout:
+    gap: 12px
+    padding: 12px
+    grid-template-columns: repeat(4, minmax(0, 1fr))
+    grid-template-areas: |
+      "hero hero kedel vv"
+      "hero hero frem varmetab"
+      "temp temp piller drift"
+      "forb forb forb forb"
+    mediaquery:
+      '(max-width: 900px)':
+        grid-template-columns: repeat(2, minmax(0, 1fr))
+        grid-template-areas: |
+          "hero hero"
+          "piller piller"
+          "kedel vv"
+          "frem frem"
+          "drift drift"
+          "varmetab varmetab"
+          "temp temp"
+          "forb forb"
+  cards:
+  - type: custom:button-card
+    template: kort
+    entity: sensor.pellux_sniffer_kedeltemperatur
+    variables:
+      h: min(440px, 100vw)
+    tap_action:
+      action: none
+    triggers_update: &id001
+    - sensor.pellux_sniffer_kedeltemperatur
+    - sensor.pellux_sniffer_varmt_vand
+    - sensor.pellux_sniffer_kreds_1_fremlob
+    - sensor.pellux_sniffer_udetemperatur
+    - sensor.pellux_sniffer_blaeser
+    - sensor.pellux_sniffer_flamme
+    - sensor.pellux_sniffer_taender_ra
+    - binary_sensor.pellux_sniffer_snegl_fremforing
+    custom_fields:
+      body: |
+        [[[
+        const p=n=>n+'px';
+        const g=id=>(states[id]?parseFloat(states[id].state):NaN);
+        const f=(x,d)=>isNaN(x)?'--':x.toLocaleString('da-DK',{minimumFractionDigits:d,maximumFractionDigits:d});
+        const tc=t=>isNaN(t)?'#64748b':t<30?'#38bdf8':t<45?'#22d3ee':t<55?'#facc15':t<68?'#f59e0b':'#ef4444';
+        const K=g('sensor.pellux_sniffer_kedeltemperatur'),VV=g('sensor.pellux_sniffer_varmt_vand'),KF=g('sensor.pellux_sniffer_kreds_1_fremlob'),UD=g('sensor.pellux_sniffer_udetemperatur');
+        const BL=g('sensor.pellux_sniffer_blaeser'),FL=g('sensor.pellux_sniffer_flamme'),IG=g('sensor.pellux_sniffer_taender_ra');
+        const SN=states['binary_sensor.pellux_sniffer_snegl_fremforing']&&states['binary_sensor.pellux_sniffer_snegl_fremforing'].state==='on';
+        const st=(()=>{
+          if(isNaN(FL)&&isNaN(BL)) return {t:'Offline',c:'#64748b',ic:'mdi:lan-disconnect'};
+          if(IG>200) return {t:'Tænder',c:'#f97316',ic:'mdi:fire-alert'};
+          if(FL>50) return {t:'Brænder',c:'#f59e0b',ic:'mdi:fire'};
+          if(BL>=90) return {t:'Udluftning',c:'#38bdf8',ic:'mdi:fan'};
+          if(BL>0) return {t:'Starter / slukker',c:'#38bdf8',ic:'mdi:fan-clock'};
+          return {t:'Stop',c:'#94a3b8',ic:'mdi:fire-off'};
+        })();
+        const on=FL>50, fan=BL>0;
+        const fd=fan?Math.max(0.35,2.4-BL/45).toFixed(2):0;
+        const fo=on?Math.min(1,0.35+FL/255):0;
+        const MK=variables.maal_kedel;
+        const pill=`<span style='display:inline-flex;align-items:center;gap:${p(6)};padding:${p(5)} ${p(12)};border-radius:999px;background:${st.c}22;border:1px solid ${st.c}66;color:${st.c};font-size:${p(14)};font-weight:700;'><ha-icon icon='${st.ic}' style='--mdc-icon-size:${p(18)};width:${p(18)};height:${p(18)};'></ha-icon>${st.t}</span>`;
+        const vvPct=isNaN(VV)?0:Math.max(0,Math.min(1,(VV-20)/45));
+        const svg=`<svg viewBox='0 0 640 470' width='100%' height='100%' preserveAspectRatio='xMidYMid meet' style='display:block'>
+        <defs>
+        <linearGradient id='bo' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#1e3a52'/><stop offset='1' stop-color='#0c1f30'/></linearGradient>
+        <linearGradient id='tk' x1='0' y1='1' x2='0' y2='0'><stop offset='0' stop-color='#38bdf8'/><stop offset='${(vvPct*100).toFixed(0)}%' stop-color='${tc(VV)}'/><stop offset='1' stop-color='${tc(VV)}'/></linearGradient>
+        <radialGradient id='gl' cx='.5' cy='.7' r='.6'><stop offset='0' stop-color='#f59e0b' stop-opacity='${(fo*0.55).toFixed(2)}'/><stop offset='1' stop-color='#f59e0b' stop-opacity='0'/></radialGradient>
+        </defs>
+        <path d='M300 70 H420 V120' class='pipe ${on?"flow":""}' stroke='${tc(K)}'/>
+        <path d='M300 95 H560 V150' class='pipe ${on?"flow":""}' stroke='${tc(KF)}'/>
+        <path d='M300 70 H420' stroke='${tc(K)}' stroke-width='10' fill='none' stroke-linecap='round' opacity='.25'/>
+        <rect x='380' y='120' width='84' height='190' rx='38' fill='url(#tk)' opacity='.9' stroke='rgba(255,255,255,.25)' stroke-width='2'/>
+        <path d='M392 165 q30 12 60 0 M392 190 q30 12 60 0 M392 215 q30 12 60 0' stroke='rgba(255,255,255,.35)' stroke-width='3' fill='none'/>
+        <text x='422' y='345' text-anchor='middle' class='lb'>Varmt vand</text>
+        <text x='422' y='385' text-anchor='middle' class='vl' fill='${tc(VV)}'>${f(VV,1)}°</text>
+        <g transform='translate(520 150)'><rect x='0' y='0' width='80' height='110' rx='8' fill='none' stroke='${tc(KF)}' stroke-width='3'/><path d='M14 0 V110 M30 0 V110 M46 0 V110 M62 0 V110' stroke='${tc(KF)}' stroke-width='5' opacity='.75'/></g>
+        <text x='560' y='295' text-anchor='middle' class='lb'>Fremløb</text>
+        <text x='560' y='335' text-anchor='middle' class='vs' fill='${tc(KF)}'>${f(KF,1)}°</text>
+        <g transform='translate(525 368)'><path d='M14 40 a18 18 0 0 1 34 -8 a14 14 0 0 1 22 14 a10 10 0 0 1 -4 20 h-50 a14 14 0 0 1 -2 -26z' fill='none' stroke='#94a3b8' stroke-width='3'/></g>
+        <text x='600' y='420' text-anchor='end' class='vs' fill='#e2e8f0' style='font-size:26px'>${f(UD,1)}°</text>
+        <text x='600' y='446' text-anchor='end' class='lb' style='font-size:15px'>ude</text>
+        <rect x='40' y='40' width='260' height='300' rx='22' fill='url(#bo)' stroke='rgba(56,189,248,.35)' stroke-width='2'/>
+        <rect x='70' y='175' width='200' height='130' rx='14' fill='#050d16' stroke='rgba(255,255,255,.12)'/>
+        <rect x='70' y='175' width='200' height='130' rx='14' fill='url(#gl)'/>
+        <g class='${on?"flick":""}' style='opacity:${fo}'>
+        <path d='M170 300 C120 280 130 230 150 205 C152 230 165 238 170 220 C175 240 190 235 195 210 C215 240 220 285 170 300Z' fill='#f97316'/>
+        <path d='M170 300 C140 288 145 255 158 240 C162 258 172 262 175 250 C182 262 192 270 185 285 C180 295 175 300 170 300Z' fill='#facc15'/>
+        </g>
+        ${!on?`<text x='170' y='250' text-anchor='middle' class='lb' style='font-size:18px'>${st.t==='Offline'?'Ingen data':'Flamme slukket'}</text>`:''}
+        <text x='170' y='112' text-anchor='middle' class='big' fill='${tc(K)}'>${f(K,1)}°</text>
+        <text x='170' y='145' text-anchor='middle' class='lb'>Kedel · mål ${MK}°</text>
+        <g transform='translate(85 395)'><circle r='34' fill='#0b1b2a' stroke='rgba(56,189,248,.45)' stroke-width='2'/><g class='${fan?"spin":""}' style='animation-duration:${fd}s'><path d='M0 -4 C6 -26 22 -22 18 -8Z M4 0 C26 6 22 22 8 18Z M0 4 C-6 26 -22 22 -18 8Z M-4 0 C-26 -6 -22 -22 -8 -18Z' fill='#38bdf8'/></g><circle r='5' fill='#e2e8f0'/></g>
+        <text x='85' y='452' text-anchor='middle' class='vs' fill='#38bdf8' style='font-size:22px'>${f(BL,0)} %</text>
+        <g transform='translate(215 395)'><path d='M-40 -30 h80 l-22 34 h-36z' fill='#3b2a14' stroke='#a16207' stroke-width='2'/><path d='M-18 4 V24 H40' stroke='${SN?"#f59e0b":"#475569"}' stroke-width='9' fill='none' stroke-linecap='round' class='${SN?"pulse":""}'/><circle cx='-20' cy='-14' r='4' fill='#d97706'/><circle cx='-6' cy='-18' r='4' fill='#b45309'/><circle cx='8' cy='-12' r='4' fill='#d97706'/><circle cx='20' cy='-20' r='4' fill='#b45309'/></g>
+        <text x='225' y='452' text-anchor='middle' class='vs' fill='${SN?"#f59e0b":"#94a3b8"}' style='font-size:22px'>Snegl ${SN?"kører":"stille"}</text>
+        </svg>`;
+        return `<div style='height:100%;display:flex;flex-direction:column;gap:${p(6)};'>
+        <div style='display:flex;align-items:center;justify-content:space-between;gap:${p(8)};'>
+        <div style='display:flex;align-items:center;gap:${p(10)};'><ha-icon icon='mdi:fireplace' style='--mdc-icon-size:${p(28)};width:${p(28)};height:${p(28)};color:#f59e0b;'></ha-icon><div><div style='font-size:${p(24)};font-weight:800;color:white;line-height:1.1;'>Pellux 100</div><div style='font-size:${p(13)};color:rgba(255,255,255,.55);'>Live fra CAN-bussen</div></div></div>${pill}</div>
+        <div style='flex:1;min-height:0;'>${svg}</div></div>`;
+        ]]]
+    view_layout:
+      grid-area: hero
+    extra_styles: |
+      .pipe{fill:none;stroke-width:6;stroke-linecap:round;opacity:.85}
+      .flow{stroke-dasharray:14 10;animation:flow 1.2s linear infinite}
+      .spin{transform-box:fill-box;transform-origin:center;animation:spin linear infinite}
+      .flick{transform-box:fill-box;transform-origin:50% 100%;animation:flick .9s ease-in-out infinite}
+      .pulse{animation:pulse 1s ease-in-out infinite}
+      .lb{fill:rgba(255,255,255,.6);font-size:17px;font-family:inherit;font-weight:600}
+      .vl{font-size:40px;font-weight:800;font-family:inherit}
+      .vs{font-size:30px;font-weight:800;font-family:inherit}
+      .big{font-size:58px;font-weight:800;font-family:inherit}
+      @keyframes spin{to{transform:rotate(360deg)}}
+      @keyframes flow{to{stroke-dashoffset:-48}}
+      @keyframes flick{0%,100%{transform:scale(1,1)}35%{transform:scale(1.04,1.1)}70%{transform:scale(.97,.94)}}
+      @keyframes pulse{50%{opacity:.35}}
+      @media (prefers-reduced-motion: reduce){.flow,.spin,.flick,.pulse{animation:none}}
+  - type: custom:button-card
+    template: kort
+    entity: sensor.pellux_sniffer_kedeltemperatur
+    variables:
+      h: 214px
+    tap_action:
+      action: more-info
+    triggers_update: *id001
+    custom_fields:
+      body: |
+        [[[
+        const p=n=>n+'px';
+        const g=id=>(states[id]?parseFloat(states[id].state):NaN);
+        const f=(x,d)=>isNaN(x)?'--':x.toLocaleString('da-DK',{minimumFractionDigits:d,maximumFractionDigits:d});
+        const tc=t=>isNaN(t)?'#64748b':t<30?'#38bdf8':t<45?'#22d3ee':t<55?'#facc15':t<68?'#f59e0b':'#ef4444';
+        const K=g('sensor.pellux_sniffer_kedeltemperatur'),VV=g('sensor.pellux_sniffer_varmt_vand'),KF=g('sensor.pellux_sniffer_kreds_1_fremlob'),UD=g('sensor.pellux_sniffer_udetemperatur');
+        const BL=g('sensor.pellux_sniffer_blaeser'),FL=g('sensor.pellux_sniffer_flamme'),IG=g('sensor.pellux_sniffer_taender_ra');
+        const SN=states['binary_sensor.pellux_sniffer_snegl_fremforing']&&states['binary_sensor.pellux_sniffer_snegl_fremforing'].state==='on';
+        const t=K; const MAAL=variables.maal_kedel;
+        const pct=isNaN(t)?0:Math.max(0,Math.min(100,(t-20)/(85-20)*100));
+        const gp=Math.max(0,Math.min(100,(MAAL-20)/(85-20)*100));
+        return `<div style='display:flex;flex-direction:column;gap:${p(6)};'>
+        <div style='display:flex;align-items:center;gap:${p(8)};'><ha-icon icon='mdi:fire' style='--mdc-icon-size:${p(22)};width:${p(22)};height:${p(22)};color:#f59e0b;'></ha-icon><span style='font-size:${p(18)};font-weight:700;color:white;'>Kedel</span></div>
+        <div style='display:flex;flex-wrap:wrap;align-items:baseline;gap:${p(8)};'><span style='font-size:${p(46)};font-weight:800;color:${tc(t)};line-height:1;'>${f(t,1)}°</span><span style='font-size:${p(13)};color:rgba(255,255,255,.55);'>mål ${MAAL}°</span></div>
+        <div style='position:relative;height:${p(8)};background:rgba(255,255,255,.10);border-radius:999px;'><div style='width:${pct}%;height:100%;border-radius:999px;background:linear-gradient(90deg,#38bdf8,${tc(t)});'></div><div style='position:absolute;top:-3px;bottom:-3px;left:${gp}%;width:2px;background:white;opacity:.8;'></div></div></div>`;
+        ]]]
+      graph:
+        card:
+          type: custom:apexcharts-card
+          graph_span: 12h
+          header:
+            show: false
+          card_mod: &id002
+            style: ha-card{background:transparent !important;border:none !important;box-shadow:none !important;padding:0 !important;margin:0 !important;}
+          apex_config:
+            chart:
+              height: 90
+              sparkline:
+                enabled: true
+              toolbar:
+                show: false
+            stroke:
+              width: 2
+            fill:
+              type: gradient
+              gradient:
+                opacityFrom: 0.35
+                opacityTo: 0
+            tooltip:
+              enabled: true
+          series:
+          - entity: sensor.pellux_sniffer_kedeltemperatur
+            color: '#f59e0b'
+            name: °C
+            type: area
+            stroke_width: 2
+            group_by:
+              duration: 5min
+              func: avg
+    view_layout:
+      grid-area: kedel
+    styles: &id003
+      grid:
+      - grid-template-areas: '"body" "graph"'
+      - grid-template-columns: minmax(0,1fr)
+      - grid-template-rows: auto minmax(0,1fr)
+      custom_fields:
+        graph:
+        - align-self: end
+        - margin: 0 -4px -6px -4px
+  - type: custom:button-card
+    template: kort
+    entity: sensor.pellux_sniffer_varmt_vand
+    variables:
+      h: 214px
+    tap_action:
+      action: more-info
+    triggers_update:
+    - sensor.pellux_sniffer_kedeltemperatur
+    - sensor.pellux_sniffer_varmt_vand
+    - sensor.pellux_sniffer_kreds_1_fremlob
+    - sensor.pellux_sniffer_udetemperatur
+    - sensor.pellux_sniffer_blaeser
+    - sensor.pellux_sniffer_flamme
+    - sensor.pellux_sniffer_taender_ra
+    - binary_sensor.pellux_sniffer_snegl_fremforing
+    - binary_sensor.pellux_varmtvandsprioritet
+    custom_fields:
+      body: |
+        [[[
+        const p=n=>n+'px';
+        const g=id=>(states[id]?parseFloat(states[id].state):NaN);
+        const f=(x,d)=>isNaN(x)?'--':x.toLocaleString('da-DK',{minimumFractionDigits:d,maximumFractionDigits:d});
+        const tc=t=>isNaN(t)?'#64748b':t<30?'#38bdf8':t<45?'#22d3ee':t<55?'#facc15':t<68?'#f59e0b':'#ef4444';
+        const K=g('sensor.pellux_sniffer_kedeltemperatur'),VV=g('sensor.pellux_sniffer_varmt_vand'),KF=g('sensor.pellux_sniffer_kreds_1_fremlob'),UD=g('sensor.pellux_sniffer_udetemperatur');
+        const BL=g('sensor.pellux_sniffer_blaeser'),FL=g('sensor.pellux_sniffer_flamme'),IG=g('sensor.pellux_sniffer_taender_ra');
+        const SN=states['binary_sensor.pellux_sniffer_snegl_fremforing']&&states['binary_sensor.pellux_sniffer_snegl_fremforing'].state==='on';
+        const t=VV; const MAAL=variables.maal_vv;
+        const pct=isNaN(t)?0:Math.max(0,Math.min(100,(t-20)/(65-20)*100));
+        const gp=Math.max(0,Math.min(100,(MAAL-20)/(65-20)*100));
+        return `<div style='display:flex;flex-direction:column;gap:${p(6)};'>
+        <div style='display:flex;align-items:center;gap:${p(8)};'><ha-icon icon='mdi:water-thermometer' style='--mdc-icon-size:${p(22)};width:${p(22)};height:${p(22)};color:#38bdf8;'></ha-icon><span style='font-size:${p(18)};font-weight:700;color:white;'>Varmt vand</span></div>
+        <div style='display:flex;flex-wrap:wrap;align-items:baseline;gap:${p(8)};'><span style='font-size:${p(46)};font-weight:800;color:${tc(t)};line-height:1;'>${f(t,1)}°</span>${states['binary_sensor.pellux_varmtvandsprioritet']&&states['binary_sensor.pellux_varmtvandsprioritet'].state==='on'?`<span style='display:inline-flex;align-items:center;gap:${p(4)};padding:${p(3)} ${p(10)};border-radius:999px;background:#f9731622;border:1px solid #f9731666;color:#fb923c;font-size:${p(13)};font-weight:700;white-space:nowrap;'><ha-icon icon='mdi:water-boiler' style='--mdc-icon-size:${p(15)};width:${p(15)};height:${p(15)};'></ha-icon>Opvarmes</span>`:`<span style='font-size:${p(13)};color:rgba(255,255,255,.55);'>mål ${MAAL}°</span>`}</div>
+        <div style='position:relative;height:${p(8)};background:rgba(255,255,255,.10);border-radius:999px;'><div style='width:${pct}%;height:100%;border-radius:999px;background:linear-gradient(90deg,#38bdf8,${tc(t)});'></div><div style='position:absolute;top:-3px;bottom:-3px;left:${gp}%;width:2px;background:white;opacity:.8;'></div></div></div>`;
+        ]]]
+      graph:
+        card:
+          type: custom:apexcharts-card
+          graph_span: 12h
+          header:
+            show: false
+          card_mod: *id002
+          apex_config:
+            chart:
+              height: 90
+              sparkline:
+                enabled: true
+              toolbar:
+                show: false
+            stroke:
+              width: 2
+            fill:
+              type: gradient
+              gradient:
+                opacityFrom: 0.35
+                opacityTo: 0
+            tooltip:
+              enabled: true
+          series:
+          - entity: sensor.pellux_sniffer_varmt_vand
+            color: '#38bdf8'
+            name: °C
+            type: area
+            stroke_width: 2
+            group_by:
+              duration: 5min
+              func: avg
+    view_layout:
+      grid-area: vv
+    styles: *id003
+  - type: custom:button-card
+    template: kort
+    entity: sensor.pellux_sniffer_kreds_1_fremlob
+    variables:
+      h: 214px
+    tap_action:
+      action: more-info
+    triggers_update: *id001
+    custom_fields:
+      body: |
+        [[[
+        const p=n=>n+'px';
+        const g=id=>(states[id]?parseFloat(states[id].state):NaN);
+        const f=(x,d)=>isNaN(x)?'--':x.toLocaleString('da-DK',{minimumFractionDigits:d,maximumFractionDigits:d});
+        const tc=t=>isNaN(t)?'#64748b':t<30?'#38bdf8':t<45?'#22d3ee':t<55?'#facc15':t<68?'#f59e0b':'#ef4444';
+        const K=g('sensor.pellux_sniffer_kedeltemperatur'),VV=g('sensor.pellux_sniffer_varmt_vand'),KF=g('sensor.pellux_sniffer_kreds_1_fremlob'),UD=g('sensor.pellux_sniffer_udetemperatur');
+        const BL=g('sensor.pellux_sniffer_blaeser'),FL=g('sensor.pellux_sniffer_flamme'),IG=g('sensor.pellux_sniffer_taender_ra');
+        const SN=states['binary_sensor.pellux_sniffer_snegl_fremforing']&&states['binary_sensor.pellux_sniffer_snegl_fremforing'].state==='on';
+        const blk=(ic,icc,ti,t,col,note)=>`<div style='display:flex;flex-direction:column;gap:${p(4)};'><div style='display:flex;align-items:center;gap:${p(8)};'><ha-icon icon='${ic}' style='--mdc-icon-size:${p(20)};width:${p(20)};height:${p(20)};color:${icc};'></ha-icon><span style='font-size:${p(16)};font-weight:700;color:white;'>${ti}</span></div><div style='display:flex;align-items:baseline;gap:${p(8)};'><span style='font-size:${p(38)};font-weight:800;color:${col};line-height:1;'>${f(t,1)}°</span><span style='font-size:${p(12)};color:rgba(255,255,255,.55);'>${note}</span></div></div>`;
+        return `<div style='display:flex;flex-direction:column;gap:${p(10)};'>${blk('mdi:radiator','#f97316','Kreds 1 fremløb',KF,tc(KF),'gulv/radiator')}<div style='height:1px;background:rgba(255,255,255,.08);'></div>${blk('mdi:home-thermometer-outline','#94a3b8','Ude',UD,'#e2e8f0','fyrets føler')}</div>`;
+        ]]]
+      graph:
+        card:
+          type: custom:apexcharts-card
+          graph_span: 12h
+          header:
+            show: false
+          card_mod: *id002
+          apex_config:
+            chart:
+              height: 60
+              sparkline:
+                enabled: true
+              toolbar:
+                show: false
+            stroke:
+              width: 2
+            fill:
+              type: gradient
+              gradient:
+                opacityFrom: 0.35
+                opacityTo: 0
+            tooltip:
+              enabled: true
+          series:
+          - entity: sensor.pellux_sniffer_kreds_1_fremlob
+            color: '#f97316'
+            name: °C
+            type: area
+            stroke_width: 2
+            group_by:
+              duration: 5min
+              func: avg
+          - entity: sensor.pellux_sniffer_udetemperatur
+            color: '#94a3b8'
+            name: Ude °C
+            type: line
+            stroke_width: 2
+            group_by:
+              duration: 5min
+              func: avg
+    view_layout:
+      grid-area: frem
+    styles: *id003
+  - type: custom:button-card
+    template: kort
+    entity: sensor.husets_varmetab
+    variables:
+      h: 214px
+    tap_action:
+      action: more-info
+    triggers_update:
+    - sensor.husets_varmetab
+    - sensor.pillefyr_varme_24_t
+    - sensor.varmebehov_ved_12_degc
+    - sensor.udetemperatur_middel_24_t
+    - sensor.indetemperatur_middel_24_t
+    custom_fields:
+      body: |
+        [[[
+        const p=n=>n+'px';
+        const g=id=>(states[id]?parseFloat(states[id].state):NaN);
+        const f=(x,d)=>isNaN(x)?'--':x.toLocaleString('da-DK',{minimumFractionDigits:d,maximumFractionDigits:d});
+        const WK=g('sensor.husets_varmetab'),Q=g('sensor.pillefyr_varme_24_t'),P12=g('sensor.varmebehov_ved_12_degc'),UD=g('sensor.udetemperatur_middel_24_t'),IN=g('sensor.indetemperatur_middel_24_t');
+        const row=(l,v)=>`<div style='display:flex;justify-content:space-between;gap:${p(6)};font-size:${p(13)};'><span style='color:rgba(255,255,255,.6);white-space:nowrap;'>${l}</span><span style='color:white;font-weight:700;white-space:nowrap;'>${v}</span></div>`;
+        return `<div style='display:flex;flex-direction:column;gap:${p(5)};'>
+        <div style='display:flex;align-items:center;gap:${p(8)};'><ha-icon icon='mdi:home-thermometer' style='--mdc-icon-size:${p(20)};width:${p(20)};height:${p(20)};color:#f472b6;'></ha-icon><span style='font-size:${p(16)};font-weight:700;color:white;'>Varmetab</span></div>
+        <div style='display:flex;align-items:baseline;gap:${p(6)};'><span style='font-size:${p(38)};font-weight:800;color:#f472b6;line-height:1;'>${f(WK,0)}</span><span style='font-size:${p(13)};color:rgba(255,255,255,.55);'>W/K</span></div>
+        ${row('Varme 24 t',f(Q,0)+' kWh')}${row('Inde / ude 24 t',f(IN,1)+' / '+f(UD,1)+' °C')}${row('Behov ved -12 °C',f(P12,1)+' kW')}</div>`;
+        ]]]
+      graph:
+        card:
+          type: custom:apexcharts-card
+          graph_span: 7d
+          header:
+            show: false
+          card_mod: *id002
+          apex_config:
+            chart:
+              height: 55
+              sparkline:
+                enabled: true
+              toolbar:
+                show: false
+            stroke:
+              width: 2
+            fill:
+              type: gradient
+              gradient:
+                opacityFrom: 0.35
+                opacityTo: 0
+            tooltip:
+              enabled: true
+          series:
+          - entity: sensor.husets_varmetab
+            color: '#f472b6'
+            name: W/K
+            type: area
+            stroke_width: 2
+            group_by:
+              duration: 1h
+              func: avg
+    view_layout:
+      grid-area: varmetab
+    styles: *id003
+  - type: custom:button-card
+    template: kort
+    entity: sensor.pellux_sniffer_kedeltemperatur
+    variables:
+      h: 300px
+    tap_action:
+      action: none
+    triggers_update:
+    - sensor.pellux_sniffer_kedeltemperatur
+    custom_fields:
+      body: |
+        [[[
+        const p=n=>n+'px';
+        return `<div style='display:flex;align-items:center;justify-content:space-between;'><div style='display:flex;align-items:center;gap:${p(8)};'><ha-icon icon='mdi:chart-line' style='--mdc-icon-size:${p(22)};width:${p(22)};height:${p(22)};color:#38bdf8;'></ha-icon><span style='font-size:${p(18)};font-weight:700;color:white;'>Temperaturer</span></div><span style='font-size:${p(12)};color:rgba(255,255,255,.5);'>sidste 24 timer</span></div>`;
+        ]]]
+      graph:
+        card:
+          type: custom:apexcharts-card
+          graph_span: 24h
+          header:
+            show: false
+          card_mod: *id002
+          apex_config:
+            chart:
+              background: transparent
+              foreColor: rgba(255,255,255,0.55)
+              toolbar:
+                show: false
+              height: 220
+            grid:
+              borderColor: rgba(255,255,255,0.07)
+              strokeDashArray: 3
+            legend:
+              show: true
+              position: top
+              horizontalAlign: left
+              labels:
+                colors: rgba(255,255,255,0.75)
+            stroke:
+              curve: smooth
+              width: 2
+            tooltip:
+              theme: dark
+              x:
+                format: HH:mm
+            xaxis:
+              axisBorder:
+                show: false
+              axisTicks:
+                show: false
+              labels:
+                style:
+                  colors: rgba(255,255,255,0.55)
+          series:
+          - entity: sensor.pellux_sniffer_kedeltemperatur
+            color: '#f59e0b'
+            name: Kedel
+            type: line
+            stroke_width: 2
+            group_by:
+              duration: 10min
+              func: avg
+          - entity: sensor.pellux_sniffer_varmt_vand
+            color: '#38bdf8'
+            name: Varmt vand
+            type: line
+            stroke_width: 2
+            group_by:
+              duration: 10min
+              func: avg
+          - entity: sensor.pellux_sniffer_kreds_1_fremlob
+            color: '#f97316'
+            name: Fremløb
+            type: line
+            stroke_width: 2
+            group_by:
+              duration: 10min
+              func: avg
+          - entity: sensor.pellux_sniffer_udetemperatur
+            color: '#94a3b8'
+            name: Ude
+            type: line
+            stroke_width: 2
+            group_by:
+              duration: 10min
+              func: avg
+          yaxis:
+          - decimals: 0
+            apex_config: &id004
+              labels:
+                style:
+                  colors: rgba(255,255,255,0.55)
+    view_layout:
+      grid-area: temp
+    styles: &id005
+      grid:
+      - grid-template-areas: '"body" "graph"'
+      - grid-template-columns: minmax(0,1fr)
+      - grid-template-rows: auto minmax(0,1fr)
+      custom_fields:
+        graph:
+        - min-width: '0'
+        - overflow: hidden
+  - type: custom:button-card
+    template: kort
+    entity: sensor.pillefyr_beholdning_beregnet
+    variables:
+      h: 300px
+    tap_action:
+      action: none
+    triggers_update:
+    - sensor.pillefyr_beholdning_beregnet
+    - counter.pillefyr_saekke_fyldt_pa
+    - input_datetime.pillefyr_sidst_fyldt
+    - input_number.pillefyr_kilo_pr_saek
+    custom_fields:
+      body: |
+        [[[
+        const p=n=>n+'px';
+        const g=id=>(states[id]?parseFloat(states[id].state):NaN);
+        const f=(x,d)=>isNaN(x)?'--':x.toLocaleString('da-DK',{minimumFractionDigits:d,maximumFractionDigits:d});
+        const KPS=g('input_number.pillefyr_kilo_pr_saek')||15;
+        const CAP=variables.beholder_kg;
+        const kg=g('sensor.pillefyr_beholdning_beregnet');
+        const pct=isNaN(kg)?0:Math.max(0,Math.min(100,kg/CAP*100));
+        const n=g('counter.pillefyr_saekke_fyldt_pa')||0;
+        const ld=states['input_datetime.pillefyr_sidst_fyldt'];
+        const lt=ld&&ld.attributes.timestamp?new Date(ld.attributes.timestamp*1000):null;
+        const nu=lt&&(Date.now()-lt)<2*3600e3&&n>0;
+        const ss=x=>x===1?'1 sæk':x+' sække';
+        let col='#a3e635'; if(isNaN(kg))col='#94a3b8'; else if(kg<15)col='#f87171'; else if(kg<45)col='#fbbf24';
+        const fyld=nu?`<div style='background:rgba(163,230,53,.14);border:1px solid rgba(163,230,53,.45);border-radius:${p(12)};padding:${p(8)} ${p(12)};display:flex;align-items:center;justify-content:space-between;gap:${p(8)};'><span style='font-size:${p(14)};color:rgba(255,255,255,.8);'>Fyldt på nu</span><span style='font-size:${p(24)};font-weight:800;color:#a3e635;white-space:nowrap;'>${ss(n)}</span></div>`
+         :`<div style='font-size:${p(13)};color:rgba(255,255,255,.55);'>${lt&&n>0?'Sidst fyldt '+lt.toLocaleDateString('da-DK',{day:'numeric',month:'short'})+' kl. '+lt.toLocaleTimeString('da-DK',{hour:'2-digit',minute:'2-digit'})+' · '+ss(n):'Tryk +1 sæk for hver sæk du hælder i'}</div>`;
+        return `<div style='display:flex;flex-direction:column;gap:${p(8)};'>
+        <div style='display:flex;align-items:center;justify-content:space-between;'><div style='display:flex;align-items:center;gap:${p(8)};'><ha-icon icon='mdi:grain' style='--mdc-icon-size:${p(22)};width:${p(22)};height:${p(22)};color:#fbbf24;'></ha-icon><span style='font-size:${p(18)};font-weight:700;color:white;'>Piller</span></div><span style='font-size:${p(12)};color:rgba(255,255,255,.5);'>beregnet ud fra sneglen</span></div>
+        <div style='display:flex;align-items:baseline;gap:${p(10)};'><span style='font-size:${p(40)};font-weight:800;color:white;line-height:1;'>${isNaN(kg)?'--':f(kg,0)+' kg'}</span><span style='font-size:${p(16)};font-weight:700;color:${col};'>ca. ${f(kg/KPS,1)} sække</span></div>
+        <div style='height:${p(8)};background:rgba(255,255,255,.10);border-radius:999px;overflow:hidden;'><div style='width:${pct}%;height:100%;background:linear-gradient(90deg,#facc15,#f59e0b);'></div></div>
+        ${fyld}</div>`;
+        ]]]
+      knapper:
+        card:
+          type: grid
+          columns: 3
+          square: false
+          cards:
+          - type: custom:button-card
+            name: +1 sæk
+            icon: mdi:plus
+            show_state: false
+            tap_action:
+              action: perform-action
+              perform_action: script.pillefyr_plus_saek
+            styles:
+              card:
+              - height: 48px
+              - border-radius: 12px
+              - background: rgba(163,230,53,0.14)
+              - border: 1px solid rgba(163,230,53,0.45)
+              - box-shadow: none
+              - padding: 0 6px
+              grid:
+              - grid-template-areas: '"i n"'
+              - grid-template-columns: auto auto
+              - justify-content: center
+              - align-items: center
+              - column-gap: 6px
+              icon:
+              - width: 20px
+              - color: rgb(163,230,53)
+              name:
+              - font-size: 15px
+              - font-weight: '700'
+              - color: rgb(163,230,53)
+          - type: custom:button-card
+            name: Fortryd
+            icon: mdi:undo
+            show_state: false
+            tap_action:
+              action: perform-action
+              perform_action: script.pillefyr_minus_saek
+            styles:
+              card:
+              - height: 48px
+              - border-radius: 12px
+              - background: rgba(248,113,113,0.14)
+              - border: 1px solid rgba(248,113,113,0.45)
+              - box-shadow: none
+              - padding: 0 6px
+              grid:
+              - grid-template-areas: '"i n"'
+              - grid-template-columns: auto auto
+              - justify-content: center
+              - align-items: center
+              - column-gap: 6px
+              icon:
+              - width: 20px
+              - color: rgb(248,113,113)
+              name:
+              - font-size: 15px
+              - font-weight: '700'
+              - color: rgb(248,113,113)
+          - type: custom:button-card
+            name: Ret kg
+            icon: mdi:pencil
+            show_state: false
+            tap_action:
+              action: more-info
+              entity: input_number.pillefyr_saet_beholdning
+            styles:
+              card:
+              - height: 48px
+              - border-radius: 12px
+              - background: rgba(148,163,184,0.14)
+              - border: 1px solid rgba(148,163,184,0.45)
+              - box-shadow: none
+              - padding: 0 6px
+              grid:
+              - grid-template-areas: '"i n"'
+              - grid-template-columns: auto auto
+              - justify-content: center
+              - align-items: center
+              - column-gap: 6px
+              icon:
+              - width: 20px
+              - color: rgb(148,163,184)
+              name:
+              - font-size: 15px
+              - font-weight: '700'
+              - color: rgb(148,163,184)
+    view_layout:
+      grid-area: piller
+    styles:
+      grid:
+      - grid-template-areas: '"body" "knapper"'
+      - grid-template-columns: minmax(0,1fr)
+      - grid-template-rows: auto minmax(0,1fr)
+      custom_fields:
+        knapper:
+        - min-width: '0'
+        - align-self: end
+  - type: custom:button-card
+    template: kort
+    entity: sensor.pellux_sniffer_kedeltemperatur
+    variables:
+      h: 300px
+    tap_action:
+      action: none
+    triggers_update:
+    - sensor.pellux_sniffer_kedeltemperatur
+    - sensor.pellux_sniffer_varmt_vand
+    - sensor.pellux_sniffer_kreds_1_fremlob
+    - sensor.pellux_sniffer_udetemperatur
+    - sensor.pellux_sniffer_blaeser
+    - sensor.pellux_sniffer_flamme
+    - sensor.pellux_sniffer_taender_ra
+    - binary_sensor.pellux_sniffer_snegl_fremforing
+    - sensor.pillefyr_beholdning_beregnet
+    custom_fields:
+      body: |
+        [[[
+        const p=n=>n+'px';
+        const g=id=>(states[id]?parseFloat(states[id].state):NaN);
+        const f=(x,d)=>isNaN(x)?'--':x.toLocaleString('da-DK',{minimumFractionDigits:d,maximumFractionDigits:d});
+        const tc=t=>isNaN(t)?'#64748b':t<30?'#38bdf8':t<45?'#22d3ee':t<55?'#facc15':t<68?'#f59e0b':'#ef4444';
+        const K=g('sensor.pellux_sniffer_kedeltemperatur'),VV=g('sensor.pellux_sniffer_varmt_vand'),KF=g('sensor.pellux_sniffer_kreds_1_fremlob'),UD=g('sensor.pellux_sniffer_udetemperatur');
+        const BL=g('sensor.pellux_sniffer_blaeser'),FL=g('sensor.pellux_sniffer_flamme'),IG=g('sensor.pellux_sniffer_taender_ra');
+        const SN=states['binary_sensor.pellux_sniffer_snegl_fremforing']&&states['binary_sensor.pellux_sniffer_snegl_fremforing'].state==='on';
+        const st=(()=>{
+          if(isNaN(FL)&&isNaN(BL)) return {t:'Offline',c:'#64748b',ic:'mdi:lan-disconnect'};
+          if(IG>200) return {t:'Tænder',c:'#f97316',ic:'mdi:fire-alert'};
+          if(FL>50) return {t:'Brænder',c:'#f59e0b',ic:'mdi:fire'};
+          if(BL>=90) return {t:'Udluftning',c:'#38bdf8',ic:'mdi:fan'};
+          if(BL>0) return {t:'Starter / slukker',c:'#38bdf8',ic:'mdi:fan-clock'};
+          return {t:'Stop',c:'#94a3b8',ic:'mdi:fire-off'};
+        })();
+        const kg=g('sensor.pillefyr_beholdning_beregnet'), CAP=variables.beholder_kg, lvl=kg/CAP*100;
+        const row=(ic,icc,l,v)=>`<div style='display:flex;align-items:center;justify-content:space-between;gap:${p(8)};padding:${p(7)} 0;border-bottom:1px solid rgba(255,255,255,.06);'><div style='display:flex;align-items:center;gap:${p(8)};min-width:0;'><ha-icon icon='${ic}' style='--mdc-icon-size:${p(18)};width:${p(18)};height:${p(18)};color:${icc};flex:none;'></ha-icon><span style='font-size:${p(14)};color:rgba(255,255,255,.7);white-space:nowrap;'>${l}</span></div><span style='font-size:${p(15)};font-weight:700;color:white;white-space:nowrap;'>${v}</span></div>`;
+        const pct=isNaN(lvl)?0:Math.max(0,Math.min(100,lvl));
+        return `<div style='display:flex;flex-direction:column;gap:${p(4)};'>
+        <div style='display:flex;align-items:center;justify-content:space-between;margin-bottom:${p(4)};'><div style='display:flex;align-items:center;gap:${p(8)};'><ha-icon icon='mdi:clipboard-pulse-outline' style='--mdc-icon-size:${p(22)};width:${p(22)};height:${p(22)};color:#a3e635;'></ha-icon><span style='font-size:${p(18)};font-weight:700;color:white;'>Drift</span></div><span style='font-size:${p(14)};font-weight:700;color:${st.c};'>${st.t}</span></div>
+        ${row('mdi:fire','#f59e0b','Flamme',isNaN(FL)?'--':f(FL,0))}${row('mdi:fan','#38bdf8','Blæser',f(BL,0)+' %')}${row('mdi:screw-lag','#a3e635','Snegl',SN?'kører':'stille')}${row('mdi:home-thermometer-outline','#94a3b8','Ude',f(UD,1)+' °C')}${row('mdi:grain','#fbbf24','Piller',isNaN(kg)?'--':f(kg,0)+' kg')}
+        <div style='height:${p(8)};background:rgba(255,255,255,.10);border-radius:999px;overflow:hidden;margin-top:${p(6)};'><div style='width:${pct}%;height:100%;background:linear-gradient(90deg,#facc15,#f59e0b);'></div></div>
+        <div style='font-size:${p(12)};color:rgba(255,255,255,.5);'>Pillebeholdning ${isNaN(lvl)?'--':Math.round(lvl)+' %'}</div></div>`;
+        ]]]
+    view_layout:
+      grid-area: drift
+  - type: custom:button-card
+    template: kort
+    entity: sensor.pellux_sniffer_flamme
+    variables:
+      h: 320px
+    tap_action:
+      action: none
+    triggers_update:
+    - sensor.pellux_sniffer_flamme
+    custom_fields:
+      body: |
+        [[[
+        const p=n=>n+'px';
+        return `<div style='display:flex;align-items:center;justify-content:space-between;'><div style='display:flex;align-items:center;gap:${p(8)};'><ha-icon icon='mdi:fire-circle' style='--mdc-icon-size:${p(22)};width:${p(22)};height:${p(22)};color:#f59e0b;'></ha-icon><span style='font-size:${p(18)};font-weight:700;color:white;'>Forbrænding</span></div><span style='font-size:${p(12)};color:rgba(255,255,255,.5);'>sidste 6 timer</span></div>`;
+        ]]]
+      graph:
+        card:
+          type: custom:apexcharts-card
+          graph_span: 6h
+          header:
+            show: false
+          card_mod: *id002
+          apex_config:
+            chart:
+              background: transparent
+              foreColor: rgba(255,255,255,0.55)
+              toolbar:
+                show: false
+              height: 240
+            grid:
+              borderColor: rgba(255,255,255,0.07)
+              strokeDashArray: 3
+            legend:
+              show: true
+              position: top
+              horizontalAlign: left
+              labels:
+                colors: rgba(255,255,255,0.75)
+            stroke:
+              curve: smooth
+              width: 2
+            tooltip:
+              theme: dark
+              x:
+                format: HH:mm
+            xaxis:
+              axisBorder:
+                show: false
+              axisTicks:
+                show: false
+              labels:
+                style:
+                  colors: rgba(255,255,255,0.55)
+          series:
+          - entity: sensor.pellux_sniffer_flamme
+            color: '#f59e0b'
+            name: Flamme
+            type: area
+            stroke_width: 2
+            group_by:
+              duration: 2min
+              func: avg
+            yaxis_id: fl
+          - entity: sensor.pellux_sniffer_blaeser
+            color: '#38bdf8'
+            name: Blæser %
+            type: line
+            stroke_width: 2
+            group_by:
+              duration: 2min
+              func: avg
+            yaxis_id: pct
+          - entity: binary_sensor.pellux_sniffer_snegl_fremforing
+            color: '#a3e635'
+            name: Snegl
+            type: column
+            stroke_width: 2
+            group_by:
+              duration: 2min
+              func: max
+            yaxis_id: pct
+            transform: 'return x === ''on'' ? 10 : 0;'
+          yaxis:
+          - id: fl
+            min: 0
+            max: 255
+            show: false
+          - id: pct
+            min: 0
+            max: 100
+            decimals: 0
+            apex_config: *id004
+    view_layout:
+      grid-area: forb
+    styles: *id005
